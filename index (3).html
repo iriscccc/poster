@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>闪光海报</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; width: 100vw; height: 100vh; overflow: hidden; }
+  #scene { position: relative; width: 100%; height: 100%; }
+
+  #bg {
+    position: absolute;
+    inset: -10%;
+    width: 120%; height: 120%;
+    object-fit: cover; object-position: center;
+    will-change: transform;
+  }
+  #fg {
+    position: absolute;
+    inset: -3%;
+    width: 106%; height: 106%;
+    object-fit: cover; object-position: center;
+    will-change: transform;
+  }
+  #holo, #specular {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+  }
+  #holo    { mix-blend-mode: color-dodge; }
+  #specular{ mix-blend-mode: screen; }
+
+  #overlay {
+    position: absolute; inset: 0;
+    background: rgba(0,0,0,0.9);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 20px; z-index: 30;
+  }
+  #overlay p {
+    color: rgba(255,255,255,0.4);
+    font-family: -apple-system, sans-serif;
+    font-size: 14px; letter-spacing: 0.05em;
+    text-align: center; line-height: 1.8;
+  }
+  #startBtn {
+    font-family: -apple-system, sans-serif;
+    font-size: 16px; color: #fff;
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 100px; padding: 14px 52px;
+    letter-spacing: 0.08em; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #startBtn:active { background: rgba(255,255,255,0.08); }
+</style>
+</head>
+<body>
+<div id="scene">
+  <img id="bg" src="https://i.imgur.com/k02VZJt.jpg" alt="">
+  <img id="fg" src="https://i.imgur.com/ZJz7e3q.jpg" alt="">
+  <canvas id="holo"></canvas>
+  <canvas id="specular"></canvas>
+  <div id="overlay">
+    <p>倾斜手机<br>体验无双闪光视差</p>
+    <button id="startBtn">启 动</button>
+  </div>
+</div>
+<script>
+const BG_MOVE        = 8
+const FG_MOVE        = 2
+const TILT_RANGE     = 28
+const RAINBOW_O      = 0.35
+const SPECULAR_O     = 0.70
+const SPARKLE_COUNT  = 90
+const LERP           = 0.08
+
+const bg    = document.getElementById('bg')
+const fg    = document.getElementById('fg')
+const holoC = document.getElementById('holo')
+const specC = document.getElementById('specular')
+const hCtx  = holoC.getContext('2d')
+const sCtx  = specC.getContext('2d')
+
+let W=0, H=0, rawX=0, rawY=0, curX=0, curY=0, betaOffset=null
+const sparkles=[]
+
+function initSparkles(){
+  sparkles.length=0
+  for(let i=0;i<SPARKLE_COUNT;i++)
+    sparkles.push({x:Math.random(),y:Math.random(),
+      r:0.5+Math.random()*2, phase:Math.random()*Math.PI*2,
+      speed:0.8+Math.random()*1.2})
+}
+
+function resize(){
+  W=holoC.width=specC.width=window.innerWidth
+  H=holoC.height=specC.height=window.innerHeight
+  initSparkles()
+}
+window.addEventListener('resize', resize)
+
+function applyParallax(px,py){
+  bg.style.transform=`translate(${-px*BG_MOVE}%,${-py*BG_MOVE}%)`
+  fg.style.transform=`translate(${px*FG_MOVE}%,${py*FG_MOVE}%)`
+}
+
+function drawRainbow(px,py){
+  hCtx.clearRect(0,0,W,H)
+  const angle=Math.atan2(py,px)+Math.PI*0.5
+  const cos=Math.cos(angle), sin=Math.sin(angle)
+  const d=Math.max(W,H)*1.1
+  const cx=W*0.5, cy=H*0.5
+  const g=hCtx.createLinearGradient(
+    cx+cos*d*(0.3+px*0.3), cy+sin*d*(0.3+py*0.3),
+    cx-cos*d*(0.3-px*0.3), cy-sin*d*(0.3-py*0.3))
+  const o=RAINBOW_O
+  g.addColorStop(0.00,`rgba(255,  0,200,0)`)
+  g.addColorStop(0.12,`rgba(230,  0,255,${o*0.7})`)
+  g.addColorStop(0.25,`rgba( 50, 50,255,${o})`)
+  g.addColorStop(0.38,`rgba(  0,200,255,${o})`)
+  g.addColorStop(0.50,`rgba(  0,255,180,${o*0.9})`)
+  g.addColorStop(0.62,`rgba(120,255,  0,${o*0.8})`)
+  g.addColorStop(0.75,`rgba(255,220,  0,${o*0.7})`)
+  g.addColorStop(0.88,`rgba(255, 80,  0,${o*0.5})`)
+  g.addColorStop(1.00,`rgba(255,  0,150,0)`)
+  hCtx.fillStyle=g
+  hCtx.fillRect(0,0,W,H)
+}
+
+function drawSpecular(px,py){
+  sCtx.clearRect(0,0,W,H)
+  const sx=W*(0.5+px*0.38), sy=H*(0.5+py*0.38)
+  const r=Math.max(W,H)*0.6
+  const spot=sCtx.createRadialGradient(sx,sy,0,sx,sy,r)
+  const o=SPECULAR_O
+  spot.addColorStop(0,   `rgba(255,255,255,${o})`)
+  spot.addColorStop(0.10,`rgba(255,255,255,${o*0.5})`)
+  spot.addColorStop(0.35,`rgba(255,255,255,${o*0.08})`)
+  spot.addColorStop(1,   `rgba(255,255,255,0)`)
+  sCtx.fillStyle=spot
+  sCtx.fillRect(0,0,W,H)
+  const t=Date.now()*0.0022
+  sparkles.forEach(sp=>{
+    const ax=sp.x*W, ay=sp.y*H
+    const dist=Math.hypot(ax-sx,ay-sy)
+    const prox=Math.max(0,1-dist/r)
+    const alpha=prox*(Math.sin(t*sp.speed+sp.phase)*0.5+0.5)*0.95
+    if(alpha<0.05) return
+    const sz=sp.r*(1+prox*1.2)
+    sCtx.save()
+    sCtx.globalAlpha=alpha
+    sCtx.fillStyle='#fff'
+    sCtx.beginPath(); sCtx.ellipse(ax,ay,sz*4,sz*0.5,0,0,Math.PI*2); sCtx.fill()
+    sCtx.beginPath(); sCtx.ellipse(ax,ay,sz*0.5,sz*4,0,0,Math.PI*2); sCtx.fill()
+    sCtx.beginPath(); sCtx.ellipse(ax,ay,sz*2,sz*0.4,Math.PI/4,0,Math.PI*2); sCtx.fill()
+    sCtx.beginPath(); sCtx.ellipse(ax,ay,sz*2,sz*0.4,-Math.PI/4,0,Math.PI*2); sCtx.fill()
+    sCtx.restore()
+  })
+}
+
+function loop(){
+  curX+=(rawX-curX)*LERP
+  curY+=(rawY-curY)*LERP
+  const px=Math.max(-1,Math.min(1,curX/TILT_RANGE))
+  const py=Math.max(-1,Math.min(1,curY/TILT_RANGE))
+  applyParallax(px,py)
+  drawRainbow(px,py)
+  drawSpecular(px,py)
+  requestAnimationFrame(loop)
+}
+
+function onOrientation(e){
+  rawX=e.gamma||0
+  if(betaOffset===null) betaOffset=e.beta||90
+  rawY=(e.beta||90)-betaOffset
+}
+
+document.addEventListener('mousemove',e=>{
+  rawX=(e.clientX/window.innerWidth -0.5)*TILT_RANGE*2
+  rawY=(e.clientY/window.innerHeight-0.5)*TILT_RANGE*2
+})
+document.addEventListener('touchmove',e=>{
+  e.preventDefault()
+  rawX=(e.touches[0].clientX/window.innerWidth -0.5)*TILT_RANGE*2
+  rawY=(e.touches[0].clientY/window.innerHeight-0.5)*TILT_RANGE*2
+},{passive:false})
+
+document.getElementById('startBtn').addEventListener('click',async()=>{
+  if(typeof DeviceOrientationEvent!=='undefined'&&
+     typeof DeviceOrientationEvent.requestPermission==='function'){
+    try{
+      const res=await DeviceOrientationEvent.requestPermission()
+      if(res==='granted') window.addEventListener('deviceorientation',onOrientation)
+    }catch(e){}
+  } else if(window.DeviceOrientationEvent){
+    window.addEventListener('deviceorientation',onOrientation)
+  }
+  document.getElementById('overlay').style.display='none'
+  resize(); loop()
+})
+</script>
+</body>
+</html>
